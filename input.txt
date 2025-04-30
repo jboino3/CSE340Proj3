@@ -1,0 +1,13 @@
+a, b;
+
+{
+  input a;
+  input b;
+  IF a > b
+  {
+    output a;
+  }
+  output b;
+}
+
+3 2
