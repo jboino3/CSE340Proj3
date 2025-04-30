@@ -31,6 +31,13 @@ InstructionNode* parse_input_stmt();
 InstructionNode* parse_output_stmt();
 InstructionNode* parse_stmt_list();
 InstructionNode* parse_body();
+InstructionNode* parse_while_stmt();
+InstructionNode* parse_switch_stmt();
+InstructionNode* parse_case_list(int switch_var_loc, InstructionNode* end_target);
+InstructionNode* parse_default_case(InstructionNode* end_target);
+
+
+
 void parse_var_section();
 void parse_inputs();
 
@@ -112,6 +119,10 @@ InstructionNode* parse_stmt() {
     if (t.token_type == INPUT) return parse_input_stmt();
     if (t.token_type == OUTPUT) return parse_output_stmt();
     if (t.token_type == IF) return parse_if_stmt();
+    if (t.token_type == WHILE) return parse_while_stmt();
+    if (t.token_type == SWITCH) return parse_switch_stmt();
+
+
 
     cout << "Syntax error: Unknown stmt start token\n";
     exit(1);
@@ -227,6 +238,200 @@ InstructionNode* parse_if_stmt() {
 
     return cjmp;
 }
+
+InstructionNode* parse_while_stmt() {
+    lexer.GetToken();
+
+    Token op1 = lexer.GetToken();
+    Token relop = lexer.GetToken();
+    Token op2 = lexer.GetToken();
+
+    ConditionalOperatorType cond_op;
+    if (relop.token_type == GREATER) cond_op = CONDITION_GREATER;
+    else if (relop.token_type == LESS) cond_op = CONDITION_LESS;
+    else cond_op = CONDITION_NOTEQUAL;
+
+    int op1_loc = (op1.token_type == ID) ? get_or_add_var_location(op1.lexeme) : store_constant(stoi(op1.lexeme));
+    int op2_loc = (op2.token_type == ID) ? get_or_add_var_location(op2.lexeme) : store_constant(stoi(op2.lexeme));
+
+    InstructionNode* cjmp = new InstructionNode;
+    cjmp->type = CJMP;
+    cjmp->next = nullptr;
+    cjmp->cjmp_inst.condition_op = cond_op;
+    cjmp->cjmp_inst.op1_loc = op1_loc;
+    cjmp->cjmp_inst.op2_loc = op2_loc;
+
+    InstructionNode* body = parse_body();
+    cjmp->next = body;
+
+    InstructionNode* temp = body;
+    while (temp->next != nullptr) {
+        temp = temp->next;
+    }
+
+    InstructionNode* jmp = new InstructionNode;
+    jmp->type = JMP;
+    jmp->next = nullptr;
+    jmp->jmp_inst.target = cjmp;
+
+    temp->next = jmp;
+
+    InstructionNode* noop = new InstructionNode;
+    noop->type = NOOP;
+    noop->next = nullptr;
+
+    jmp->next = noop;
+    cjmp->cjmp_inst.target = noop;
+
+    return cjmp;
+}
+
+InstructionNode* parse_switch_stmt() {
+    lexer.GetToken(); // SWITCH
+    Token switch_var = lexer.GetToken(); // ID
+    int switch_var_loc = get_or_add_var_location(switch_var.lexeme);
+    lexer.GetToken(); // LBRACE
+
+    std::vector<InstructionNode*> cjumps;
+    std::vector<InstructionNode*> jmp_to_end;
+
+    InstructionNode* end_noop = new InstructionNode;
+    end_noop->type = NOOP;
+    end_noop->next = nullptr;
+
+    InstructionNode* head = nullptr;
+    InstructionNode* current = nullptr;
+
+    while (lexer.peek(1).token_type == CASE) {
+        lexer.GetToken(); // CASE
+        Token val = lexer.GetToken(); // NUM
+        lexer.GetToken(); // COLON
+
+        int const_loc = store_constant(stoi(val.lexeme));
+
+        InstructionNode* cjmp = new InstructionNode;
+        cjmp->type = CJMP;
+        cjmp->cjmp_inst.condition_op = CONDITION_NOTEQUAL;
+        cjmp->cjmp_inst.op1_loc = switch_var_loc;
+        cjmp->cjmp_inst.op2_loc = const_loc;
+
+        if (!head) head = cjmp;
+        if (current) current->next = cjmp;
+        current = cjmp;
+
+        cjumps.push_back(cjmp);
+
+        InstructionNode* body = parse_body();
+        cjmp->next = body;
+
+        InstructionNode* body_tail = body;
+        while (body_tail->next) body_tail = body_tail->next;
+
+        InstructionNode* jmp = new InstructionNode;
+        jmp->type = JMP;
+        jmp->jmp_inst.target = end_noop;
+        jmp->next = nullptr;
+        body_tail->next = jmp;
+
+        jmp_to_end.push_back(jmp);
+    }
+
+    // DEFAULT case
+    if (lexer.peek(1).token_type == DEFAULT) {
+        lexer.GetToken(); // DEFAULT
+        lexer.GetToken(); // COLON
+
+        InstructionNode* def_body = parse_body();
+        if (current) current->next = def_body;
+        else head = def_body;
+
+        InstructionNode* tail = def_body;
+        while (tail->next) tail = tail->next;
+
+        InstructionNode* jmp = new InstructionNode;
+        jmp->type = JMP;
+        jmp->jmp_inst.target = end_noop;
+        jmp->next = nullptr;
+        tail->next = jmp;
+    }
+
+    lexer.GetToken(); // RBRACE
+
+    // Patch CJMP target to the *next CJMP* or default
+    for (size_t i = 0; i < cjumps.size(); ++i) {
+        cjumps[i]->cjmp_inst.target = (i + 1 < cjumps.size())
+            ? cjumps[i + 1]
+            : (current->next ? current->next : end_noop);
+    }
+
+    // Final noop at the end
+    InstructionNode* walker = head;
+    while (walker && walker->next) walker = walker->next;
+    if (walker) walker->next = end_noop;
+    else head = end_noop;
+
+    return head;
+}
+
+
+
+InstructionNode* parse_case_list(int switch_var_loc, InstructionNode* end_target) {
+    if (lexer.peek(1).token_type != CASE) return nullptr;
+
+    lexer.GetToken(); // CASE
+    Token case_val = lexer.GetToken(); // NUM
+    lexer.GetToken(); // COLON
+
+    InstructionNode* cjmp = new InstructionNode;
+    cjmp->type = CJMP;
+    cjmp->next = nullptr;
+    cjmp->cjmp_inst.condition_op = CONDITION_NOTEQUAL;
+    cjmp->cjmp_inst.op1_loc = switch_var_loc;
+    cjmp->cjmp_inst.op2_loc = store_constant(stoi(case_val.lexeme));
+
+    InstructionNode* body = parse_body();
+    cjmp->next = body;
+
+    // CASE body ends with a JMP to the end of the switch
+    InstructionNode* temp = body;
+    while (temp->next != nullptr) temp = temp->next;
+
+    InstructionNode* jump = new InstructionNode;
+    jump->type = JMP;
+    jump->jmp_inst.target = end_target;
+    jump->next = nullptr;
+
+    temp->next = jump;
+
+    // Recursively parse the next case
+    InstructionNode* next_case = parse_case_list(switch_var_loc, end_target);
+
+    // CJMP jumps to the next case if the current one fails
+    cjmp->cjmp_inst.target = next_case ? next_case : end_target;
+
+    // ❌ Do NOT chain jump->next = next_case
+    // The jump should end the case; NOT fall through.
+
+    return cjmp;
+}
+
+InstructionNode* parse_default_case(InstructionNode* end_target) {
+    lexer.GetToken(); // DEFAULT
+    lexer.GetToken(); // COLON
+
+    InstructionNode* body = parse_body();
+    InstructionNode* temp = body;
+    while (temp->next != nullptr) temp = temp->next;
+
+    InstructionNode* jmp = new InstructionNode;
+    jmp->type = JMP;
+    jmp->jmp_inst.target = end_target;
+    jmp->next = nullptr;
+
+    temp->next = jmp;
+    return body;
+}
+
 
 void parse_inputs() {
     Token t = lexer.GetToken();
