@@ -1,21 +1,22 @@
 a, b;
 
 {
-a = 3;
-SWITCH a {
-CASE 1: {
+a = 2;
+switch a {
+case 1: {
     b = 10;
 }
-CASE 2: {
+case 2: {
     b = 20;
 }
-CASE 3: {
+case 3: {
     b = 30;
 }
-DEFAULT: {
+default: {
     b = 99;
 }
 output b;
 }
 
 }
+
