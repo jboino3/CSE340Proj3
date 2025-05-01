@@ -1,0 +1,21 @@
+a, b;
+
+{
+a = 3;
+SWITCH a {
+CASE 1: {
+    b = 10;
+}
+CASE 2: {
+    b = 20;
+}
+CASE 3: {
+    b = 30;
+}
+DEFAULT: {
+    b = 99;
+}
+output b;
+}
+
+}

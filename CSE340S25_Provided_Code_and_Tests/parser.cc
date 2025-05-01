@@ -287,23 +287,36 @@ InstructionNode* parse_while_stmt() {
 }
 
 InstructionNode* parse_switch_stmt() {
-    lexer.GetToken();
-    Token var = lexer.GetToken();
+    lexer.GetToken(); // SWITCH
+    Token var = lexer.GetToken(); // ID
     int switch_var_loc = get_or_add_var_location(var.lexeme);
-    lexer.GetToken();
+    lexer.GetToken(); // LBRACE
 
-    InstructionNode* end_noop = new InstructionNode{NOOP, {}, nullptr};
+    InstructionNode* end_noop = new InstructionNode;
+    end_noop->type = NOOP;
+    end_noop->next = nullptr;
+
     InstructionNode* head = nullptr;
     InstructionNode* current = nullptr;
 
     std::vector<InstructionNode*> cjmps;
+    bool has_default = false;
+    InstructionNode* default_head = nullptr;
 
+    // CASE clauses
     while (lexer.peek(1).token_type == CASE) {
-        lexer.GetToken(); 
-        Token val = lexer.GetToken(); 
-        lexer.GetToken(); 
+        lexer.GetToken(); // CASE
+        Token val = lexer.GetToken(); // NUM
 
+        if (val.token_type != NUM) {
+            cout << "Syntax error: Expected NUM after CASE\n";
+            exit(1);
+        }
+
+        cout << "[DEBUG] Trying to convert to int: '" << val.lexeme << "'" << endl;
         int const_loc = store_constant(stoi(val.lexeme));
+
+        lexer.GetToken(); // COLON
 
         InstructionNode* cjmp = new InstructionNode;
         cjmp->type = CJMP;
@@ -311,7 +324,7 @@ InstructionNode* parse_switch_stmt() {
         cjmp->cjmp_inst.op1_loc = switch_var_loc;
         cjmp->cjmp_inst.op2_loc = const_loc;
 
-        InstructionNode* body = parse_body(); 
+        InstructionNode* body = parse_body();
         InstructionNode* body_tail = body;
         while (body_tail->next) body_tail = body_tail->next;
 
@@ -319,50 +332,59 @@ InstructionNode* parse_switch_stmt() {
         jmp_to_end->type = JMP;
         jmp_to_end->jmp_inst.target = end_noop;
         jmp_to_end->next = nullptr;
-        body_tail->next = jmp_to_end;
 
+        body_tail->next = jmp_to_end;
         cjmp->next = body;
 
-        if (!head) head = cjmp;
-        else current->next = cjmp;
+        if (!head)
+            head = cjmp;
+        else
+            current->next = cjmp;
 
         current = cjmp;
         cjmps.push_back(cjmp);
     }
 
+    // DEFAULT clause
     if (lexer.peek(1).token_type == DEFAULT) {
-        lexer.GetToken();
-        lexer.GetToken(); 
-        InstructionNode* default_body = parse_body();
-        InstructionNode* default_tail = default_body;
+        has_default = true;
+        lexer.GetToken(); // DEFAULT
+        lexer.GetToken(); // COLON
+
+        default_head = parse_body();
+        InstructionNode* default_tail = default_head;
         while (default_tail->next) default_tail = default_tail->next;
 
         InstructionNode* jmp_to_end = new InstructionNode;
         jmp_to_end->type = JMP;
         jmp_to_end->jmp_inst.target = end_noop;
         jmp_to_end->next = nullptr;
+
         default_tail->next = jmp_to_end;
 
-        if (current) current->next = default_body;
-        else head = default_body;
+        if (current)
+            current->next = default_head;
+        else
+            head = default_head;
     }
 
-    lexer.GetToken();
+    lexer.GetToken(); // RBRACE
 
     for (size_t i = 0; i < cjmps.size(); ++i) {
         cjmps[i]->cjmp_inst.target = (i + 1 < cjmps.size())
             ? cjmps[i + 1]
-            : (lexer.peek(1).token_type == DEFAULT ? current->next : end_noop);
+            : (has_default ? default_head : end_noop);
     }
 
     InstructionNode* walker = head;
     while (walker && walker->next) walker = walker->next;
-    if (walker) walker->next = end_noop;
-    else head = end_noop;
+    if (walker)
+        walker->next = end_noop;
+    else
+        head = end_noop;
 
     return head;
 }
-
 
 InstructionNode* parse_case_list(int switch_var_loc, InstructionNode* end_target) {
     if (lexer.peek(1).token_type != CASE) return nullptr;
