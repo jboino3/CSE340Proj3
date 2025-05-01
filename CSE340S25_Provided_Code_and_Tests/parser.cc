@@ -32,6 +32,7 @@ InstructionNode* parse_stmt_list();
 InstructionNode* parse_body();
 InstructionNode* parse_while_stmt();
 InstructionNode* parse_for_stmt();
+InstructionNode* parse_switch_stmt();
 
 void parse_var_section();
 void parse_inputs();
@@ -116,6 +117,8 @@ InstructionNode* parse_stmt() {
     if (t.token_type == IF) return parse_if_stmt();
     if (t.token_type == WHILE) return parse_while_stmt();
     if (t.token_type == FOR) return parse_for_stmt();
+    if (t.token_type == SWITCH) return parse_switch_stmt();
+
 
 
     cout << "Syntax error: Unknown stmt start token\n";
@@ -336,6 +339,85 @@ InstructionNode* parse_for_stmt() {
     return assign1;
 }
 
+
+InstructionNode* parse_switch_stmt() {
+    lexer.GetToken(); 
+    Token var_token = lexer.GetToken(); 
+    int var_loc = get_or_add_var_location(var_token.lexeme);
+
+    lexer.GetToken();
+
+    InstructionNode* head = nullptr;
+    InstructionNode* tail = nullptr;
+
+    InstructionNode* end = new InstructionNode;
+    end->type = NOOP;
+    end->next = nullptr;
+
+    Token t = lexer.peek(1);
+    while (t.token_type == CASE) {
+        lexer.GetToken(); 
+        Token num_token = lexer.GetToken(); 
+        lexer.GetToken();
+
+        int const_loc = store_constant(stoi(num_token.lexeme));
+
+        InstructionNode* cjmp = new InstructionNode;
+        cjmp->type = CJMP;
+        cjmp->cjmp_inst.condition_op = CONDITION_NOTEQUAL;
+        cjmp->cjmp_inst.op1_loc = var_loc;
+        cjmp->cjmp_inst.op2_loc = const_loc;
+        cjmp->next = nullptr;
+
+        InstructionNode* body = parse_body();
+
+        InstructionNode* jmp = new InstructionNode;
+        jmp->type = JMP;
+        jmp->jmp_inst.target = end;
+        jmp->next = nullptr;
+
+        InstructionNode* temp = body;
+        while (temp->next != nullptr) temp = temp->next;
+        temp->next = jmp;
+
+        cjmp->cjmp_inst.target = body;
+
+        if (head == nullptr) {
+            head = cjmp;
+            tail = cjmp;
+        } else {
+            tail->next = cjmp;
+            tail = cjmp;
+        }
+
+        t = lexer.peek(1);
+    }
+
+    if (t.token_type == DEFAULT) {
+        lexer.GetToken(); 
+        lexer.GetToken(); 
+
+        InstructionNode* def_body = parse_body();
+
+        InstructionNode* jmp = new InstructionNode;
+        jmp->type = JMP;
+        jmp->jmp_inst.target = end;
+        jmp->next = nullptr;
+
+        InstructionNode* temp = def_body;
+        while (temp->next != nullptr) temp = temp->next;
+        temp->next = jmp;
+
+        tail->next = def_body;
+        tail = temp;
+    } else {
+        tail->next = end;
+    }
+
+    lexer.GetToken();
+
+    return head;
+}
 
 
 void parse_inputs() {
