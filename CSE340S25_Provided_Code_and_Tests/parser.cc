@@ -4,12 +4,14 @@
 #include <string>
 #include "lexer.h"
 #include "execute.h"
+#include <set>
 
 using namespace std;
 
 LexicalAnalyzer lexer;
 map<string, int> variable_table;
 int mem_index = 0;
+std::set<int> seen_cases;
 
 int get_or_add_var_location(string name) {
     if (variable_table.find(name) == variable_table.end()) {
@@ -339,11 +341,19 @@ InstructionNode* parse_for_stmt() {
     return assign1;
 }
 
-
 InstructionNode* parse_switch_stmt() {
     lexer.GetToken(); 
-    Token var_token = lexer.GetToken(); 
-    int var_loc = get_or_add_var_location(var_token.lexeme);
+    Token var_token = lexer.GetToken();
+    int var_loc;
+
+    if (var_token.token_type == ID) {
+        var_loc = get_or_add_var_location(var_token.lexeme);
+    } else if (var_token.token_type == NUM) {
+        var_loc = store_constant(stoi(var_token.lexeme));
+    } else {
+        cout << "Syntax error: SWITCH must be followed by ID or NUM\n";
+        exit(1);
+    }
 
     lexer.GetToken();
 
@@ -354,13 +364,23 @@ InstructionNode* parse_switch_stmt() {
     end->type = NOOP;
     end->next = nullptr;
 
+    set<int> seen_cases;
     Token t = lexer.peek(1);
     while (t.token_type == CASE) {
         lexer.GetToken(); 
-        Token num_token = lexer.GetToken(); 
-        lexer.GetToken();
+        Token num_token = lexer.GetToken();
+        int case_val = stoi(num_token.lexeme);
+        lexer.GetToken(); 
 
-        int const_loc = store_constant(stoi(num_token.lexeme));
+        if (seen_cases.count(case_val)) {
+            cout << "Warning: Duplicate CASE value " << case_val << " ignored\n";
+            parse_body(); 
+            t = lexer.peek(1);
+            continue;
+        }
+        seen_cases.insert(case_val);
+
+        int const_loc = store_constant(case_val);
 
         InstructionNode* cjmp = new InstructionNode;
         cjmp->type = CJMP;
@@ -394,31 +414,36 @@ InstructionNode* parse_switch_stmt() {
     }
 
     if (t.token_type == DEFAULT) {
-        lexer.GetToken(); 
+        lexer.GetToken();
         lexer.GetToken(); 
 
         InstructionNode* def_body = parse_body();
+
+        InstructionNode* temp = def_body;
+        while (temp->next != nullptr) temp = temp->next;
 
         InstructionNode* jmp = new InstructionNode;
         jmp->type = JMP;
         jmp->jmp_inst.target = end;
         jmp->next = nullptr;
 
-        InstructionNode* temp = def_body;
-        while (temp->next != nullptr) temp = temp->next;
         temp->next = jmp;
 
-        tail->next = def_body;
-        tail = temp;
+        if (tail)
+            tail->next = def_body;
+        else
+            head = def_body;
     } else {
-        tail->next = end;
+        if (tail)
+            tail->next = end;
+        else
+            head = end;
     }
 
-    lexer.GetToken();
+    lexer.GetToken(); 
 
     return head;
 }
-
 
 void parse_inputs() {
     Token t = lexer.GetToken();
