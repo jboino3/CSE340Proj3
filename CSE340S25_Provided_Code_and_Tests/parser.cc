@@ -145,9 +145,6 @@ InstructionNode* parse_stmt() {
     if (t.token_type == FOR) return parse_for_stmt();
     if (t.token_type == SWITCH) return parse_switch_stmt();
 
-
-
-
     cout << "Syntax error: Unknown stmt start token\n";
     exit(1);
     return nullptr;
@@ -380,13 +377,18 @@ InstructionNode* parse_switch_stmt() {
     exit_node->type = NOOP;
     exit_node->next = nullptr;
 
-    expect(SWITCH);
-    Token switch_var = expect(ID);
-    expect(LBRACE);
+    lexer.GetToken(); 
+    Token switch_var = lexer.GetToken(); 
+    if (switch_var.token_type != ID) syntax_error();
+
+    Token brace = lexer.GetToken(); 
+    if (brace.token_type != LBRACE) syntax_error();
+
     result = parse_switch_case_list(switch_var, exit_node);
 
     Token lookahead = lexer.peek(1);
     if (lookahead.token_type == RBRACE) {
+        lexer.GetToken(); 
         InstructionNode* last = result;
         while (last->next != nullptr) last = last->next;
         last->next = exit_node;
@@ -395,14 +397,12 @@ InstructionNode* parse_switch_stmt() {
         while (body_end->next != nullptr) body_end = body_end->next;
         body_end->next = exit_node;
 
-        expect(RBRACE);
         return result;
-    }
-    else if (lookahead.token_type == DEFAULT) {
+    } else if (lookahead.token_type == DEFAULT) {
         InstructionNode* default_block = parse_default_case();
-        InstructionNode* default_tail = default_block;
-        while (default_tail->next != nullptr) default_tail = default_tail->next;
-        default_tail->next = exit_node;
+        InstructionNode* tail = default_block;
+        while (tail->next != nullptr) tail = tail->next;
+        tail->next = exit_node;
 
         InstructionNode* last = result;
         while (last->next != nullptr) last = last->next;
@@ -412,7 +412,7 @@ InstructionNode* parse_switch_stmt() {
         while (body_end->next != nullptr) body_end = body_end->next;
         body_end->next = default_block;
 
-        expect(RBRACE);
+        lexer.GetToken(); 
         return result;
     } else {
         syntax_error();
@@ -421,70 +421,69 @@ InstructionNode* parse_switch_stmt() {
 }
 
 InstructionNode* parse_switch_case_list(Token switch_token, InstructionNode* end_jump) {
-    InstructionNode* first_case = parse_single_case(switch_token, end_jump);
+    InstructionNode* case_node = parse_single_case(switch_token, end_jump);
     Token next = lexer.peek(1);
 
     if (next.token_type == CASE) {
         InstructionNode* more_cases = parse_switch_case_list(switch_token, end_jump);
-        first_case->next = more_cases;
+        case_node->next = more_cases;
 
-        InstructionNode* case_tail = first_case->cjmp_inst.target;
+        InstructionNode* case_tail = case_node->cjmp_inst.target;
         while (case_tail->next != nullptr) case_tail = case_tail->next;
         case_tail->next = more_cases;
-        return first_case;
-    }
-    else if (next.token_type == DEFAULT || next.token_type == RBRACE) {
-        first_case->next = nullptr;
-        return first_case;
-    }
-    else {
+
+        return case_node;
+    } else if (next.token_type == DEFAULT || next.token_type == RBRACE) {
+        return case_node;
+    } else {
         syntax_error();
         return new InstructionNode();
     }
 }
 
 InstructionNode* parse_single_case(Token switch_token, InstructionNode* end_node) {
-    expect(CASE);
-    Token num_token = expect(NUM);
-    expect(COLON);
+    lexer.GetToken(); 
+    Token num_token = lexer.GetToken();
+    if (num_token.token_type != NUM) syntax_error();
+    if (lexer.GetToken().token_type != COLON) syntax_error();
 
-    InstructionNode* condition = new InstructionNode();
-    InstructionNode* exit_jump = new InstructionNode();
-    condition->type = CJMP;
-    condition->cjmp_inst.condition_op = CONDITION_NOTEQUAL;
+    InstructionNode* cond = new InstructionNode();
+    cond->type = CJMP;
+    cond->cjmp_inst.condition_op = CONDITION_NOTEQUAL;
 
-    exit_jump->type = JMP;
-    exit_jump->jmp_inst.target = end_node;
-    exit_jump->next = nullptr;
+    InstructionNode* jump_out = new InstructionNode();
+    jump_out->type = JMP;
+    jump_out->jmp_inst.target = end_node;
+    jump_out->next = nullptr;
 
-    bool new_const = false;
+    bool is_new = false;
     if (variable_table.find(num_token.lexeme) == variable_table.end()) {
         variable_table[num_token.lexeme] = mem_index;
-        new_const = true;
+        is_new = true;
     }
-    if (new_const) {
+    if (is_new) {
         mem[mem_index] = stoi(num_token.lexeme);
         mem_index++;
     }
 
     int lhs = get_or_add_var_location(switch_token.lexeme);
     int rhs = get_or_add_var_location(num_token.lexeme);
-
-    condition->cjmp_inst.op1_loc = lhs;
-    condition->cjmp_inst.op2_loc = rhs;
+    cond->cjmp_inst.op1_loc = lhs;
+    cond->cjmp_inst.op2_loc = rhs;
 
     InstructionNode* body = parse_body();
-    InstructionNode* body_tail = body;
-    while (body_tail->next != nullptr) body_tail = body_tail->next;
-    body_tail->next = exit_jump;
+    InstructionNode* tail = body;
+    while (tail->next != nullptr) tail = tail->next;
+    tail->next = jump_out;
 
-    condition->cjmp_inst.target = body;
-    condition->next = body;
-    return condition;
+    cond->cjmp_inst.target = body;
+    cond->next = body;
+
+    return cond;
 }
 
 InstructionNode* parse_default_case() {
-    expect(DEFAULT);
-    expect(COLON);
+    lexer.GetToken(); 
+    if (lexer.GetToken().token_type != COLON) syntax_error();
     return parse_body();
 }
