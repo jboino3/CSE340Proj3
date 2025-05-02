@@ -25,6 +25,22 @@ int store_constant(int value) {
     return mem_index++;
 }
 
+void syntax_error(){
+    cout << "SYNTAX ERROR !!!\n";
+    exit(0);
+}
+
+Token expect(TokenType expected_type)
+{
+    Token t = lexer.GetToken();
+    //cout << "consuming "; t.Print(); cout << "\n";
+    if (t.token_type != expected_type){
+        //cout << "error on line: " << t.line_no << "\n";
+        syntax_error();
+    }
+    return t;
+}
+
 InstructionNode* parse_stmt();
 InstructionNode* parse_if_stmt();
 InstructionNode* parse_assign_stmt();
@@ -35,6 +51,11 @@ InstructionNode* parse_body();
 InstructionNode* parse_while_stmt();
 InstructionNode* parse_for_stmt();
 InstructionNode* parse_switch_stmt();
+
+InstructionNode* parseDefaultCase();
+InstructionNode* parseCase(Token, struct InstructionNode*);
+InstructionNode* parseCaseList(Token, struct InstructionNode*);
+InstructionNode* parseSwitchStmt();
 
 void parse_var_section();
 void parse_inputs();
@@ -119,7 +140,7 @@ InstructionNode* parse_stmt() {
     if (t.token_type == IF) return parse_if_stmt();
     if (t.token_type == WHILE) return parse_while_stmt();
     if (t.token_type == FOR) return parse_for_stmt();
-    if (t.token_type == SWITCH) return parse_switch_stmt();
+    if (t.token_type == SWITCH) return parseSwitchStmt();
 
 
 
@@ -451,4 +472,147 @@ void parse_inputs() {
         inputs.push_back(stoi(t.lexeme));
         t = lexer.GetToken();
     }
+}
+
+//new switch
+struct InstructionNode * parseSwitchStmt() {
+    struct InstructionNode * i = new InstructionNode();
+    struct InstructionNode * nooper = new InstructionNode();
+    nooper->type = NOOP;
+    nooper->next = nullptr;
+
+    expect(SWITCH);
+    Token s = expect(ID);
+    expect(LBRACE);
+    i = parseCaseList(s,nooper);
+
+    Token t = lexer.peek(1);
+    if(t.token_type == RBRACE){
+        //no default, connect last case->next to nooper
+        struct InstructionNode * temp = i;
+        while(temp->next != nullptr){
+            temp = temp->next;
+        }
+        temp->next = nooper;
+        //connect last case target (body) end node to nooper
+        struct InstructionNode * temp2 = temp->cjmp_inst.target;
+        while(temp2->next != nullptr){ 
+            temp2 = temp2->next;
+        }
+        temp2->next = nooper;
+
+        expect(RBRACE);
+        return i;
+    }
+    else if(t.token_type == DEFAULT){
+        //grab default and connect end of default body to nooper
+        struct InstructionNode * defalt = parseDefaultCase();
+        struct InstructionNode * eOfDefalt = defalt;
+        while(eOfDefalt->next != nullptr){
+            eOfDefalt = eOfDefalt->next;
+        }
+        eOfDefalt->next = nooper;
+
+        //connect last case->next to default and last case target (body) end node to default
+        struct InstructionNode * temp = i;
+        while(temp->next != nullptr){
+            temp = temp->next;
+        }
+        temp->next = defalt;
+        //connect last case target (body) end node to nooper
+        struct InstructionNode * temp2 = temp->cjmp_inst.target;
+        while(temp2->next != nullptr){
+            temp2 = temp2->next;
+        }
+        temp2->next = defalt;
+
+        expect(RBRACE);
+        return i;
+    }
+    else
+        syntax_error();
+    return new InstructionNode();
+}
+
+//new caselist
+struct InstructionNode * parseCaseList(Token s, struct InstructionNode * noop) {
+    struct InstructionNode * i = new InstructionNode();
+    
+    i = parseCase(s,noop);
+    Token t = lexer.peek(1);
+
+    //if another case, set next (condition NOT_EQUAL is true) to the next case
+    //and connect jumper->next at the end of i's case to the next case
+    if(t.token_type == CASE){
+        struct InstructionNode * nextCase = parseCaseList(s,noop);
+        //connect case->next to next case
+        i->next = nextCase;
+
+        //connect case->target (body) end to nextCase
+        struct InstructionNode * temp = i->cjmp_inst.target;
+        while(temp->next != nullptr){
+            temp = temp->next;
+        }
+        temp->next = nextCase;
+        return i;
+    }
+    else if(t.token_type == DEFAULT || t.token_type == RBRACE){
+        i->next = nullptr;
+        return i;
+    }
+    else
+        syntax_error();
+    return new InstructionNode();
+}
+
+//new case
+struct InstructionNode * parseCase(Token s, struct InstructionNode* noop) {
+    struct InstructionNode * i = new InstructionNode();
+    struct InstructionNode * jumper = new InstructionNode();
+    i->type = CJMP;
+    i->cjmp_inst.condition_op = CONDITION_NOTEQUAL;
+    jumper->type = JMP;
+    jumper->jmp_inst.target = noop;
+    jumper->next = nullptr;
+    
+    expect(CASE);
+    Token t = expect(NUM);
+    //allocated memory for num
+
+    bool stored = false;
+    if(variable_table.find(t.lexeme) == variable_table.end()){
+        variable_table[t.lexeme] = mem_index;
+        stored = true;
+    }
+
+    if(stored){
+        mem[mem_index] = stoi(t.lexeme);
+        mem_index++;
+    }
+
+    int var_loc = variable_table.find(s.lexeme) == variable_table.end() ? 0 : variable_table[s.lexeme];
+    int const_loc = variable_table.find(t.lexeme) == variable_table.end() ? 0 : variable_table[t.lexeme];
+
+    i->cjmp_inst.op1_loc = var_loc;
+    i->cjmp_inst.op2_loc = const_loc;
+
+    expect(COLON);
+    struct InstructionNode * body = parse_body();
+    i->cjmp_inst.target = body;
+
+    struct InstructionNode * temp = body;
+    while(temp->next != nullptr){
+        temp = temp->next;
+    }
+    temp->next = jumper;
+    return i;
+}
+
+//new default
+struct InstructionNode * parseDefaultCase() {
+    expect(DEFAULT);
+    expect(COLON);
+    struct InstructionNode * i = new InstructionNode();
+    i = parse_body();
+    return i;
 }
