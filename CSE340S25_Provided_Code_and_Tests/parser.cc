@@ -143,7 +143,8 @@ InstructionNode* parse_stmt() {
     if (t.token_type == IF) return parse_if_stmt();
     if (t.token_type == WHILE) return parse_while_stmt();
     if (t.token_type == FOR) return parse_for_stmt();
-    if (t.token_type == SWITCH) return parseSwitchStmt();
+    if (t.token_type == SWITCH) return parse_switch_stmt();
+
 
 
 
