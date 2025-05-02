@@ -1,0 +1,27 @@
+a, b;
+{
+    a = 8;
+    SWITCH a {
+        CASE 1: {
+            b = 10;
+            a = 3;
+        }
+        CASE 2: {
+            b = 20;
+            a = 4;
+        }
+        CASE 3: {
+            b = 30;
+            a = 5;
+        }
+        DEFAULT: {
+            b = 99;
+            a = 6;
+        }
+    }
+    output b;
+    output a;
+    input a;
+    output a;
+}
+1 2 3
