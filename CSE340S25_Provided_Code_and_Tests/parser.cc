@@ -355,7 +355,7 @@ InstructionNode* parse_switch_stmt() {
         exit(1);
     }
 
-    lexer.GetToken();
+    lexer.GetToken(); 
 
     InstructionNode* head = nullptr;
     InstructionNode* tail = nullptr;
@@ -364,7 +364,7 @@ InstructionNode* parse_switch_stmt() {
     end->type = NOOP;
     end->next = nullptr;
 
-    set<int> seen_cases;
+    std::set<int> seen_cases;
     Token t = lexer.peek(1);
     while (t.token_type == CASE) {
         lexer.GetToken(); 
